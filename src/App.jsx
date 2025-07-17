@@ -1,0 +1,67 @@
+import React, { useEffect, useRef } from 'react';
+import { useGasStore } from './store/gasStore';
+import web3Service from './services/web3Service';
+import Header from './components/Header';
+import GasPriceCard from './components/GasPriceCard';
+import GasChart from './components/GasChart';
+import SimulationPanel from './components/SimulationPanel';
+import { CHAIN_DETAILS } from './services/web3Service';
+import './styles/App.css';
+
+function App() {
+  const aggregateHistory = useGasStore(state => state.aggregateHistory);
+  const effectRan = useRef(false);
+
+  useEffect(() => {
+    // This pattern correctly handles React 18's StrictMode.
+    // It prevents the setup/cleanup cycle from causing race conditions.
+    if (effectRan.current === true || process.env.NODE_ENV !== 'development') {
+        web3Service.initProviders();
+        const priceFetchInterval = setInterval(web3Service.fetchEthUsdPrice, 30000);
+        const historyAggregationInterval = setInterval(aggregateHistory, 60000);
+
+        // Initial fetch after a short delay to allow providers to connect
+        setTimeout(web3Service.fetchEthUsdPrice, 2000);
+
+        return () => {
+            clearInterval(priceFetchInterval);
+            clearInterval(historyAggregationInterval);
+            web3Service.cleanup();
+        };
+    }
+
+    return () => {
+        effectRan.current = true;
+    };
+    
+  }, [aggregateHistory]);
+
+  return (
+    <div className="app-container">
+      <Header />
+      
+      <main>
+        <div className="gas-cards-grid">
+          {Object.keys(CHAIN_DETAILS).map(chain => (
+            <GasPriceCard key={chain} chain={chain} />
+          ))}
+        </div>
+
+        <div className="gas-charts-grid">
+           {Object.keys(CHAIN_DETAILS).map(chain => (
+            <GasChart key={chain} chain={chain} />
+          ))}
+        </div>
+
+        <SimulationPanel />
+      </main>
+      
+      <footer className="app-footer">
+        <p>Gas prices are in Gwei. Chart data is aggregated into 15-minute candlesticks.</p>
+        <p>Disclaimer: This is for demonstration purposes. Not financial advice.</p>
+      </footer>
+    </div>
+  );
+}
+
+export default App;
