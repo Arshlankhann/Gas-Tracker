@@ -122,7 +122,7 @@ const web3Service = {
       const connectionPromise = new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
           reject(new Error(`Connection timeout for ${chain}`));
-        }, 20000); // Increased timeout to 20 seconds
+        }, 40000); // Increased timeout to 20 seconds
 
         if (provider._websocket) {
           provider._websocket.on('open', () => {
