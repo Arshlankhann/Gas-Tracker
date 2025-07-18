@@ -234,7 +234,7 @@ const GasChart = memo(({ chain }) => {
           textAlign: 'center',
           opacity: 0.5
         }}>
-          <p>No data available</p>
+          {/* <p>No data available</p> */}
           <p style={{ fontSize: '12px' }}>Waiting for gas price data...</p>
         </div>
       )}
