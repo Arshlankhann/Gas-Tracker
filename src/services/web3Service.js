@@ -23,46 +23,132 @@ export const GAS_LIMIT_STANDARD_TX = 21000;
 
 const web3Service = {
   providers: {},
+  isInitialized: false,
+  connectionTimeouts: {},
   
   initProviders: () => {
+    // Prevent multiple initializations
+    if (web3Service.isInitialized) {
+      return;
+    }
+    
     const { updateGasPrice, setChainStatus } = useGasStore.getState();
 
     Object.keys(RPC_ENDPOINTS).forEach(chain => {
       try {
-        const provider = new ethers.WebSocketProvider(RPC_ENDPOINTS[chain]);
-        web3Service.providers[chain] = provider;
-
-        provider.on('block', async (blockNumber) => {
-          try {
-            const [block, feeData] = await Promise.all([provider.getBlock(blockNumber), provider.getFeeData()]);
-            if (block && feeData.maxPriorityFeePerGas) {
-              const baseFeeGwei = parseFloat(ethers.formatUnits(block.baseFeePerGas || 0, 'gwei'));
-              const priorityFeeGwei = parseFloat(ethers.formatUnits(feeData.maxPriorityFeePerGas, 'gwei'));
-              updateGasPrice(chain, baseFeeGwei, priorityFeeGwei);
-            }
-          } catch (error) {
-            // It's normal for some of these to fail occasionally, so we won't log every single one.
-          }
-        });
-
-        if (provider._websocket) {
-            provider._websocket.on('open', () => setChainStatus(chain, 'connected'));
-            provider._websocket.on('error', (err) => {
-                console.error(`${chain} WebSocket error:`, err);
-                setChainStatus(chain, 'error');
-            });
-            provider._websocket.on('close', () => setChainStatus(chain, 'reconnecting'));
-        }
-
+        // Add a small delay to prevent rapid connection attempts
+        web3Service.connectionTimeouts[chain] = setTimeout(() => {
+          web3Service.connectToChain(chain, updateGasPrice, setChainStatus);
+        }, Math.random() * 1000); // Random delay up to 1 second
       } catch (error) {
-        console.error(`Failed to connect to ${chain}:`, error);
+        console.error(`Failed to schedule connection to ${chain}:`, error);
         setChainStatus(chain, 'error');
       }
     });
+    
+    web3Service.isInitialized = true;
+  },
+
+  connectToChain: async (chain, updateGasPrice, setChainStatus) => {
+    try {
+      // Check if provider already exists and is connected
+      if (web3Service.providers[chain]) {
+        return;
+      }
+
+      const provider = new ethers.WebSocketProvider(RPC_ENDPOINTS[chain]);
+      web3Service.providers[chain] = provider;
+
+      // Add connection state tracking
+      let isConnected = false;
+      let connectionPromise = new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error(`Connection timeout for ${chain}`));
+        }, 10000); // 10 second timeout
+
+        if (provider._websocket) {
+          provider._websocket.on('open', () => {
+            clearTimeout(timeout);
+            isConnected = true;
+            setChainStatus(chain, 'connected');
+            resolve();
+          });
+          
+          provider._websocket.on('error', (err) => {
+            clearTimeout(timeout);
+            console.error(`${chain} WebSocket error:`, err);
+            setChainStatus(chain, 'error');
+            reject(err);
+          });
+          
+          provider._websocket.on('close', () => {
+            if (isConnected) {
+              setChainStatus(chain, 'reconnecting');
+              // Attempt to reconnect after a delay
+              setTimeout(() => {
+                if (web3Service.providers[chain]) {
+                  web3Service.reconnectChain(chain, updateGasPrice, setChainStatus);
+                }
+              }, 5000);
+            }
+          });
+        }
+      });
+
+      // Wait for connection to be established
+      await connectionPromise;
+
+      // Only set up block listener after connection is confirmed
+      provider.on('block', async (blockNumber) => {
+        // Check if provider is still valid before making requests
+        if (!web3Service.providers[chain] || !isConnected) {
+          return;
+        }
+
+        try {
+          const [block, feeData] = await Promise.all([
+            provider.getBlock(blockNumber),
+            provider.getFeeData()
+          ]);
+          
+          if (block && feeData.maxPriorityFeePerGas) {
+            const baseFeeGwei = parseFloat(ethers.formatUnits(block.baseFeePerGas || 0, 'gwei'));
+            const priorityFeeGwei = parseFloat(ethers.formatUnits(feeData.maxPriorityFeePerGas, 'gwei'));
+            updateGasPrice(chain, baseFeeGwei, priorityFeeGwei);
+          }
+        } catch (error) {
+          // Only log if the error isn't due to provider being destroyed
+          if (!error.message.includes('provider destroyed')) {
+            console.warn(`Error fetching block data for ${chain}:`, error.message);
+          }
+        }
+      });
+
+    } catch (error) {
+      console.error(`Failed to connect to ${chain}:`, error);
+      setChainStatus(chain, 'error');
+    }
+  },
+
+  reconnectChain: (chain, updateGasPrice, setChainStatus) => {
+    // Clean up existing provider
+    if (web3Service.providers[chain]) {
+      try {
+        web3Service.providers[chain].destroy();
+      } catch (error) {
+        // Ignore errors during cleanup
+      }
+      delete web3Service.providers[chain];
+    }
+
+    // Attempt to reconnect
+    web3Service.connectToChain(chain, updateGasPrice, setChainStatus);
   },
 
   fetchEthUsdPrice: async () => {
     const { setEthUsdPrice } = useGasStore.getState();
+    
+    // Use HTTP provider for price fetching to avoid WebSocket issues
     const provider = new ethers.JsonRpcProvider(`https://mainnet.infura.io/v3/${YOUR_INFURA_KEY}`);
     const poolContract = new ethers.Contract(UNISWAP_V3_POOL_ADDRESS, UNISWAP_V3_POOL_ABI, provider);
 
@@ -85,12 +171,25 @@ const web3Service = {
   },
   
   cleanup: () => {
-    Object.values(web3Service.providers).forEach(provider => {
+    // Clear any pending connection timeouts
+    Object.values(web3Service.connectionTimeouts).forEach(timeout => {
+      clearTimeout(timeout);
+    });
+    web3Service.connectionTimeouts = {};
+
+    // Clean up providers
+    Object.entries(web3Service.providers).forEach(([chain, provider]) => {
       if (provider && provider.destroy) {
-        provider.destroy();
+        try {
+          provider.destroy();
+        } catch (error) {
+          // Ignore errors during cleanup - provider might already be destroyed
+        }
       }
     });
+    
     web3Service.providers = {};
+    web3Service.isInitialized = false;
   }
 };
 

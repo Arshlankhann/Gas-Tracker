@@ -13,27 +13,64 @@ function App() {
   const effectRan = useRef(false);
 
   useEffect(() => {
-    // This pattern correctly handles React 18's StrictMode.
-    // It prevents the setup/cleanup cycle from causing race conditions.
-    if (effectRan.current === true || process.env.NODE_ENV !== 'development') {
-        web3Service.initProviders();
-        const priceFetchInterval = setInterval(web3Service.fetchEthUsdPrice, 30000);
-        const historyAggregationInterval = setInterval(aggregateHistory, 60000);
+    // Prevent double execution in development mode (React 18 StrictMode)
+    if (effectRan.current === false || process.env.NODE_ENV !== 'development') {
+      let mounted = true;
+      let priceFetchInterval;
+      let historyAggregationInterval;
+      let initialFetchTimeout;
 
-        // Initial fetch after a short delay to allow providers to connect
-        setTimeout(web3Service.fetchEthUsdPrice, 2000);
+      const initServices = async () => {
+        if (!mounted) return;
 
-        return () => {
-            clearInterval(priceFetchInterval);
-            clearInterval(historyAggregationInterval);
-            web3Service.cleanup();
-        };
+        try {
+          // Initialize providers
+          web3Service.initProviders();
+          
+          // Set up intervals only if still mounted
+          if (mounted) {
+            priceFetchInterval = setInterval(() => {
+              if (mounted) {
+                web3Service.fetchEthUsdPrice();
+              }
+            }, 30000);
+            
+            historyAggregationInterval = setInterval(() => {
+              if (mounted) {
+                aggregateHistory();
+              }
+            }, 60000);
+
+            // Initial fetch after a short delay to allow providers to connect
+            initialFetchTimeout = setTimeout(() => {
+              if (mounted) {
+                web3Service.fetchEthUsdPrice();
+              }
+            }, 2000);
+          }
+        } catch (error) {
+          console.error('Failed to initialize services:', error);
+        }
+      };
+
+      initServices();
+
+      return () => {
+        mounted = false;
+        
+        // Clear all intervals and timeouts
+        if (priceFetchInterval) clearInterval(priceFetchInterval);
+        if (historyAggregationInterval) clearInterval(historyAggregationInterval);
+        if (initialFetchTimeout) clearTimeout(initialFetchTimeout);
+        
+        // Cleanup web3 service
+        web3Service.cleanup();
+      };
     }
 
     return () => {
-        effectRan.current = true;
+      effectRan.current = true;
     };
-    
   }, [aggregateHistory]);
 
   return (
