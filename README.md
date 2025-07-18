@@ -1,12 +1,60 @@
-# React + Vite
+# ⛽ Real-Time Cross-Chain Gas Price Tracker with Wallet Simulation
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+🚀 **Live Demo**: [https://gas-tracker-pi.vercel.app/](https://gas-tracker-pi.vercel.app/)
 
-Currently, two official plugins are available:
+---
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## 📌 Project Overview
 
-## Expanding the ESLint configuration
+A **React.js + Web3 dashboard** that displays **real-time gas prices** across **Ethereum, Polygon, and Arbitrum**, and allows users to **simulate wallet transactions** to calculate **USD gas + transaction costs** using only **on-chain data**.
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+---
+
+## ✨ Features
+✔ **Real-Time Gas Prices** via native RPC (Ethereum, Polygon, Arbitrum)  
+✔ **No third-party APIs** for gas data  
+✔ **ETH/USD price from Uniswap V3 Swap events**  
+✔ **Transaction simulation** with cost comparison  
+✔ **Interactive candlestick chart** using `lightweight-charts`  
+✔ **Built with React, Zustand, and Ethers.js**  
+
+---
+
+## 🛠 Tech Stack
+- **Frontend:** React.js, Tailwind CSS
+- **State Management:** Zustand
+- **Blockchain Interaction:** Ethers.js
+- **Charts:** Lightweight Charts
+- **WebSocket Providers:** Ethereum, Polygon, Arbitrum
+
+---
+
+## 🔍 Problem Statement
+Build a **React dashboard** that:
+1. Fetches **real-time gas fees** from 3 blockchains via WebSocket.
+2. Calculates **USD transaction cost** for a given amount (ETH/MATIC).
+3. Displays **gas volatility** on an interactive chart.
+
+---
+
+## 📈 Architecture
+```mermaid
+graph LR
+  A[User] --> B[React Frontend]
+  B --> C[Zustand Store]
+  C --> D{Mode}
+  D -->|Live| E[WebSocket RPC]
+  D -->|Simulate| F[Cost Calculator]
+  E --> G[Ethereum RPC]
+  E --> H[Polygon RPC]
+  E --> I[Arbitrum RPC]
+  F --> J[Uniswap V3 ETH/USDC Pool]
+  J --> K[Parse Swap Events]
+  K --> L[Calculate ETH/USD]
+  L --> M[Gas Cost in USD]
+  G --> N[Base/Priority Fees]
+  H --> N
+  I --> N
+  N --> O[Candlestick Chart]
+  O --> P[Lightweight Charts]
+  M --> P
