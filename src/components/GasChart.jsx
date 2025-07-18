@@ -8,7 +8,8 @@ const GasChart = memo(({ chain }) => {
   const chartContainerRef = useRef();
   const chartRef = useRef();
   const seriesRef = useRef();
-  const data = useGasStore(state => state.chains[chain].aggregatedHistory);
+  const data = useGasStore(state => state.chains[chain]?.aggregatedHistory || []);
+  const connectionStatus = useGasStore(state => state.chains[chain]?.status || 'disconnected');
   const { name, color } = CHAIN_DETAILS[chain];
 
   useEffect(() => {
@@ -16,190 +17,227 @@ const GasChart = memo(({ chain }) => {
       return;
     }
 
-    try {
-      // Clean up previous chart if exists
-      if (chartRef.current) {
-        chartRef.current.remove();
-        chartRef.current = null;
-        seriesRef.current = null;
-      }
-
-      // Create chart with basic options
-      const chart = createChart(chartContainerRef.current, {
-        width: chartContainerRef.current.clientWidth,
-        height: 300,
-        layout: {
-          background: { type: ColorType.Solid, color: 'transparent' },
-          textColor: 'rgba(255, 255, 255, 0.9)',
-        },
-        grid: {
-          vertLines: { color: 'rgba(197, 203, 206, 0.1)' },
-          horzLines: { color: 'rgba(197, 203, 206, 0.1)' },
-        },
-        timeScale: { 
-          timeVisible: true, 
-          secondsVisible: false 
-        },
-      });
-
-      chartRef.current = chart;
-
-      // Try different approaches to create series
-      let series = null;
-
-      // Method 1: Try the old API first
-      const oldApiMethods = [
-        () => chart.addLineSeries({ color: color, lineWidth: 2 }),
-        () => chart.addAreaSeries({ 
-          topColor: color + '80', 
-          bottomColor: color + '20', 
-          lineColor: color, 
-          lineWidth: 2 
-        }),
-        () => chart.addHistogramSeries({ color: color }),
-        () => chart.addCandlestickSeries({
-          upColor: color,
-          downColor: '#E53E3E',
-          borderDownColor: '#E53E3E',
-          borderUpColor: color,
-          wickDownColor: '#E53E3E',
-          wickUpColor: color,
-        })
-      ];
-
-      // Method 2: Try the new API
-      const newApiConfigs = [
-        ['Line', { color: color, lineWidth: 2 }],
-        ['Area', { 
-          topColor: color + '80', 
-          bottomColor: color + '20', 
-          lineColor: color, 
-          lineWidth: 2 
-        }],
-        ['Histogram', { color: color }],
-        ['Candlestick', {
-          upColor: color,
-          downColor: '#E53E3E',
-          borderDownColor: '#E53E3E',
-          borderUpColor: color,
-          wickDownColor: '#E53E3E',
-          wickUpColor: color,
-        }]
-      ];
-
-      // Try old API methods first
-      for (const method of oldApiMethods) {
-        try {
-          series = method();
-          console.log('Successfully created series with old API');
-          break;
-        } catch (error) {
-          // Continue to next method
-        }
-      }
-
-      // If old API failed, try new API
-      if (!series && chart.addSeries) {
-        for (const [type, options] of newApiConfigs) {
-          try {
-            series = chart.addSeries(type, options);
-            console.log(`Successfully created ${type} series with new API`);
-            break;
-          } catch (error) {
-            // Continue to next type
-          }
-        }
-      }
-
-      // If still no series, try minimal configuration
-      if (!series) {
-        try {
-          // Try the most basic line series
-          if (chart.addLineSeries) {
-            series = chart.addLineSeries({ color: color });
-          } else if (chart.addSeries) {
-            series = chart.addSeries('Line', { color: color });
-          }
-        } catch (error) {
-          console.error('Failed to create minimal series:', error);
-        }
-      }
-
-      if (!series) {
-        throw new Error('Could not create any chart series');
-      }
-
-      seriesRef.current = series;
-
-      const handleResize = () => {
-        if (chartRef.current && chartContainerRef.current) {
-          chartRef.current.applyOptions({ width: chartContainerRef.current.clientWidth });
-        }
-      };
-      
-      window.addEventListener('resize', handleResize);
-
-      return () => {
-        window.removeEventListener('resize', handleResize);
+    const createChartInstance = () => {
+      try {
+        // Clean up previous chart if exists
         if (chartRef.current) {
           chartRef.current.remove();
           chartRef.current = null;
           seriesRef.current = null;
         }
-      };
-    } catch (error) {
-      console.error("Error creating chart:", error);
-    }
+
+        // Create chart with basic options
+        const chart = createChart(chartContainerRef.current, {
+          width: chartContainerRef.current.clientWidth,
+          height: 300,
+          layout: {
+            background: { type: ColorType.Solid, color: 'transparent' },
+            textColor: 'rgba(255, 255, 255, 0.9)',
+          },
+          grid: {
+            vertLines: { color: 'rgba(197, 203, 206, 0.1)' },
+            horzLines: { color: 'rgba(197, 203, 206, 0.1)' },
+          },
+          timeScale: { 
+            timeVisible: true, 
+            secondsVisible: false,
+            rightOffset: 12,
+            barSpacing: 3,
+            fixLeftEdge: true,
+            lockVisibleTimeRangeOnResize: true,
+          },
+          rightPriceScale: {
+            scaleMargins: {
+              top: 0.1,
+              bottom: 0.1,
+            },
+          },
+        });
+
+        chartRef.current = chart;
+
+        // Create series with fallback methods
+        let series = null;
+        
+        try {
+          // Try line series first (most reliable)
+          series = chart.addLineSeries({
+            color: color,
+            lineWidth: 2,
+            priceFormat: {
+              type: 'price',
+              precision: 2,
+              minMove: 0.01,
+            },
+          });
+          console.log(`Successfully created line series for ${chain}`);
+        } catch (error) {
+          console.error(`Failed to create line series for ${chain}:`, error);
+          
+          // Fallback to area series
+          try {
+            series = chart.addAreaSeries({
+              topColor: color + '80',
+              bottomColor: color + '20',
+              lineColor: color,
+              lineWidth: 2,
+              priceFormat: {
+                type: 'price',
+                precision: 2,
+                minMove: 0.01,
+              },
+            });
+            console.log(`Successfully created area series for ${chain}`);
+          } catch (areaError) {
+            console.error(`Failed to create area series for ${chain}:`, areaError);
+          }
+        }
+
+        if (!series) {
+          throw new Error(`Could not create any chart series for ${chain}`);
+        }
+
+        seriesRef.current = series;
+
+        const handleResize = () => {
+          if (chartRef.current && chartContainerRef.current) {
+            chartRef.current.applyOptions({ 
+              width: chartContainerRef.current.clientWidth 
+            });
+          }
+        };
+        
+        window.addEventListener('resize', handleResize);
+
+        return () => {
+          window.removeEventListener('resize', handleResize);
+          if (chartRef.current) {
+            chartRef.current.remove();
+            chartRef.current = null;
+            seriesRef.current = null;
+          }
+        };
+
+      } catch (error) {
+        console.error(`Error creating chart for ${chain}:`, error);
+      }
+    };
+
+    // Small delay to ensure container is ready
+    const timeoutId = setTimeout(createChartInstance, 100);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
   }, [chain, color]);
 
   useEffect(() => {
     if (seriesRef.current && data && data.length > 0) {
       try {
-        // Ensure data is in the correct format
-        let transformedData = data;
-        
-        // Check if data needs transformation
-        const firstItem = data[0];
-        
-        // If it's candlestick data but we're using line/area series
-        if (firstItem.close !== undefined && firstItem.open !== undefined) {
-          // Transform to line data
-          transformedData = data.map(item => ({
-            time: item.time,
-            value: item.close
-          }));
-        } else if (firstItem.value === undefined) {
-          // If no value property, try to use a reasonable default
-          transformedData = data.map(item => ({
-            time: item.time,
-            value: item.close || item.price || item.y || 0
-          }));
-        }
+        // Transform and validate data
+        const transformedData = data.map(item => {
+          let value;
+          
+          // Handle different data formats
+          if (item.close !== undefined) {
+            value = item.close;
+          } else if (item.value !== undefined) {
+            value = item.value;
+          } else if (item.price !== undefined) {
+            value = item.price;
+          } else if (item.y !== undefined) {
+            value = item.y;
+          } else {
+            value = 0;
+          }
 
-        // Validate data format
+          return {
+            time: item.time,
+            value: parseFloat(value) || 0
+          };
+        });
+
+        // Filter out invalid data points
         const validData = transformedData.filter(item => 
-          item.time && (item.value !== undefined || item.close !== undefined)
+          item.time && 
+          typeof item.value === 'number' && 
+          !isNaN(item.value) &&
+          item.value >= 0
         );
 
         if (validData.length > 0) {
+          // Sort data by time to ensure proper display
+          validData.sort((a, b) => a.time - b.time);
+          
           seriesRef.current.setData(validData);
           
           if (chartRef.current) {
             chartRef.current.timeScale().fitContent();
           }
         } else {
-          console.warn('No valid data to display');
+          console.warn(`No valid data to display for ${chain}`);
         }
       } catch (error) {
-        console.error("Error setting chart data:", error);
+        console.error(`Error setting chart data for ${chain}:`, error);
       }
     }
-  }, [data]);
+  }, [data, chain]);
+
+  const getStatusColor = (status) => {
+    switch (status) {
+      case 'connected': return '#10B981';
+      case 'connecting': return '#F59E0B';
+      case 'reconnecting': return '#EF4444';
+      case 'error': return '#EF4444';
+      default: return '#6B7280';
+    }
+  };
+
+  const getStatusText = (status) => {
+    switch (status) {
+      case 'connected': return 'Connected';
+      case 'connecting': return 'Connecting...';
+      case 'reconnecting': return 'Reconnecting...';
+      case 'error': return 'Connection Error';
+      default: return 'Disconnected';
+    }
+  };
 
   return (
     <div className="chart-container">
-      <h3 className="chart-title">{name} Gas Price (15m Intervals)</h3>
+      <div className="chart-header">
+        <h3 className="chart-title">{name} Gas Price (15m Intervals)</h3>
+        <div className="chart-status">
+          <span 
+            className="status-indicator"
+            style={{ 
+              backgroundColor: getStatusColor(connectionStatus),
+              width: '8px',
+              height: '8px',
+              borderRadius: '50%',
+              display: 'inline-block',
+              marginRight: '8px'
+            }}
+          />
+          <span className="status-text" style={{ fontSize: '12px', opacity: 0.7 }}>
+            {getStatusText(connectionStatus)}
+          </span>
+        </div>
+      </div>
       <div ref={chartContainerRef} className="chart-wrapper" />
+      {data.length === 0 && (
+        <div className="chart-placeholder" style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          textAlign: 'center',
+          opacity: 0.5
+        }}>
+          <p>No data available</p>
+          <p style={{ fontSize: '12px' }}>Waiting for gas price data...</p>
+        </div>
+      )}
     </div>
   );
 });
